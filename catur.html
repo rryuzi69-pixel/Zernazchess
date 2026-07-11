@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Catur Lengkap - Simetris</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: Arial, sans-serif;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            min-height: 100vh;
+            background-color: #f0d9b5;
+            padding: 10px;
+        }
+
+        h1 {
+            color: #4a2c2a;
+            margin: 10px 0;
+            font-size: 1.7rem;
+            text-align: center;
+        }
+
+        .info {
+            margin-bottom: 12px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            color: #4a2c2a;
+            padding: 8px 16px;
+            background: rgba(255,255,255,0.6);
+            border-radius: 8px;
+            text-align: center;
+            min-height: 44px;
+            display: flex;
+            align-items: center;
+        }
+
+        .info.sekak {
+            background: rgba(255, 80, 80, 0.3);
+            color: #b30000;
+        }
+
+        .papan-catur {
+            /* Ukuran papan tetap, maksimal lebar layar HP */
+            width: min(92vw, 500px);
+            height: min(92vw, 500px);
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            grid-template-rows: repeat(8, 1fr); /* PERBAIKAN: Baris juga dibagi rata */
+            border: 8px solid #4a2c2a;
+            border-radius: 6px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+            flex-shrink: 0; /* Mencegah papan mengecil */
+        }
+
+        .kotak {
+            /* PERBAIKAN: Ukuran kotak dijamin persegi & tidak berubah */
+            width: 100%;
+            height: 100%;
+            flex: 0 0 auto; /* Mencegah kotak menyusut/membesar */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: clamp(26px, 6.5vw, 42px);
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.2s;
+            position: relative;
+            line-height: 1; /* Menghilangkan jarak tambahan teks */
+        }
+
+        .kotak.putih { background-color: #f0d9b5; }
+        .kotak.hitam { background-color: #b58863; }
+        .kotak.terpilih { background-color: #7fc97f !important; }
+        .kotak.raja-sekak { background-color: #ff6b6b !important; }
+
+        .kotak.mungkin::after {
+            content: '';
+            position: absolute;
+            width: 28%;
+            height: 28%;
+            background: rgba(0,0,0,0.4);
+            border-radius: 50%;
+        }
+
+        .kotak.makan::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            border: 4px solid rgba(0,0,0,0.4);
+            border-radius: 50%;
+        }
+
+        .tombol-ulang {
+            margin-top: 15px;
+            padding: 12px 28px;
+            font-size: 1rem;
+            background: #4a2c2a;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .tombol-ulang:hover { background: #6d403d; }
+
+        .promosi-modal {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 30px rgba(0,0,0,0.5);
+            z-index: 100;
+            display: none;
+            text-align: center;
+        }
+        .promosi-modal h3 { margin-bottom: 15px; color: #4a2c2a; }
+        .pilihan-buah { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+        .pilihan {
+            font-size: 2.5rem;
+            padding: 10px 15px;
+            cursor: pointer;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+        .pilihan:hover { border-color: #4a2c2a; background: #f5f5f5; }
+        .latar-gelap {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            z-index: 99;
+        }
+    </style>
+</head>
+<body>
+    <h1>Permainan Catur Lengkap</h1>
+    <div class="info" id="infoGiliran">Giliran: Putih</div>
+    <div class="papan-catur" id="papan"></div>
+    <button class="tombol-ulang" onclick="mulaiUlang()">Mulai Ulang Permainan</button>
+
+    <div class="latar-gelap" id="latarGelap"></div>
+    <div class="promosi-modal" id="modalPromosi">
+        <h3>Pilih Buah untuk Promosi</h3>
+        <div class="pilihan-buah" id="pilihanBuah"></div>
+    </div>
+
+    <script>
+        const SIMBOL = {
+            'pP': '♙', 'pR': '♖', 'pN': '♘', 'pB': '♗', 'pQ': '♕', 'pK': '♔',
+            'hP': '♟', 'hR': '♜', 'hN': '♞', 'hB': '♝', 'hQ': '♛', 'hK': '♚'
+        };
+
+        let papan = [];
+        let giliran = 'putih';
+        let kotakTerpilih = null;
+        let gerakanMungkin = [];
+        let posisiRaja = { putih: {b:7,k:4}, hitam: {b:0,k:4} };
+        let sudahBergerak = {
+            rajaPutih: false, bentengKananPutih: false, bentengKiriPutih: false,
+            rajaHitam: false, bentengKananHitam: false, bentengKiriHitam: false
+        };
+        let enPassanTarget = null;
+        let posisiPromosi = null;
+
+        function inisialisasiPapan() {
+            papan = [];
+            papan[0] = ['hR', 'hN', 'hB', 'hQ', 'hK', 'hB', 'hN', 'hR'];
+            papan[1] = Array(8).fill('hP');
+            for(let i=2; i<6; i++) papan[i] = Array(8).fill(null);
+            papan[6] = Array(8).fill('pP');
+            papan[7] = ['pR', 'pN', 'pB', 'pQ', 'pK', 'pB', 'pN', 'pR'];
+            posisiRaja = { putih: {b:7,k:4}, hitam: {b:0,k:4} };
+            sudahBergerak = {
+                rajaPutih: false, bentengKananPutih: false, bentengKiriPutih: false,
+                rajaHitam: false, bentengKananHitam: false, bentengKiriHitam: false
+            };
+            enPassanTarget = null;
+        }
+
+        function dapatkanWarna(buah) {
+            if(!buah) return null;
+            return buah[0] === 'p' ? 'putih' : 'hitam';
+        }
+
+        function adaJalurLurus(b1,k1,b2,k2) {
+            const db = Math.sign(b2 - b1);
+            const dk = Math.sign(k2 - k1);
+            let b = b1 + db, k = k1 + dk;
+            while(b !== b2 || k !== k2) {
+                if(papan[b][k]) return false;
+                b += db; k += dk;
+            }
+            return true;
+        }
+
+        function posisiDilindungi(b, k, warnaPenyerang) {
+            for(let baris=0; baris<8; baris++) {
+                for(let kolom=0; kolom<8; kolom++) {
+                    const buah = papan[baris][kolom];
+                    if(!buah || dapatkanWarna(buah) !== warnaPenyerang) continue;
+                    const gerakan = dapatkanGerakanDasar(baris, kolom, true);
+                    if(gerakan.some(g => g.baris === b && g.kolom === k)) return true;
+                }
+            }
+            return false;
+        }
+
+        function apakahSekak(warnaRaja) {
+            const pos = posisiRaja[warnaRaja];
+            const lawan = warnaRaja === 'putih' ? 'hitam' : 'putih';
+            return posisiDilindungi(pos.b, pos.k, lawan);
+        }
+
+        function simulasiPindah(dariB, dariK, keB, keK) {
+            const simpanKe = papan[keB][keK];
+            const simpanDari = papan[dariB][dariK];
+            const simpanPosRaja = {...posisiRaja[dapatkanWarna(simpanDari)]};
+
+            papan[keB][keK] = simpanDari;
+            papan[dariB][dariK] = null;
+            if(simpanDari[1] === 'K') posisiRaja[dapatkanWarna(simpanDari)] = {b:keB, k:keK};
+
+            const aman = !apakahSekak(dapatkanWarna(simpanDari));
+
+            papan[dariB][dariK] = simpanDari;
+            papan[keB][keK] = simpanKe;
+            if(simpanDari[1] === 'K') posisiRaja[dapatkanWarna(simpanDari)] = simpanPosRaja;
+
+            return aman;
+        }
+
+        function dapatkanGerakanDasar(baris, kolom, hanyaSerang=false) {
+            const buah = papan[baris][kolom];
+            if(!buah) return [];
+            const warna = dapatkanWarna(buah);
+            const jenis = buah[1];
+            const gerakan = [];
+
+            function tambahGerakan(b, k) {
+                if(b <0 || b>7 || k<0 || k>7) return false;
+                const target = papan[b][k];
+                if(!target) {
+                    gerakan.push({baris: b, kolom: k});
+                    return true;
+                } else if(dapatkanWarna(target) !== warna) {
+                    gerakan.push({baris: b, kolom: k});
+                    return false;
+                }
+                return false;
+            }
+
+            switch(jenis) {
+                case 'P':
+                    const arah = warna === 'putih' ? -1 : 1;
+                    if(!hanyaSerang) {
+                        if(!papan[baris+arah]?.[kolom]) {
+                            gerakan.push({baris: baris+arah, kolom});
+                            if((warna === 'putih' && baris ===6) || (warna === 'hitam' && baris ===1)) {
+                                if(!papan[baris+2*arah][kolom]) gerakan.push({baris: baris+2*arah, kolom});
+                            }
+                        }
+                    }
+                    [-1,1].forEach(dk => {
+                        const tb = baris+arah, tk = kolom+dk;
+                        if(tb>=0 && tb<=7 && tk>=0 && tk<=7) {
+                            if(hanyaSerang || (papan[tb][tk] && dapatkanWarna(papan[tb][tk]) !== warna) ||
+                               (enPassanTarget && enPassanTarget.b === tb && enPassanTarget.k === tk)) {
+                                gerakan.push({baris: tb, kolom: tk});
+                            }
+                        }
+                    });
+                    break;
+                case 'R':
+                    for(let i=baris+1; i<=7; i++) if(!tambahGerakan(i, kolom)) break;
+                    for(let i=baris-1; i>=0; i--) if(!tambahGerakan(i, kolom)) break;
+                    for(let i=kolom+1; i<=7; i++) if(!tambahGerakan(baris, i)) break;
+                    for(let i=kolom-1; i>=0; i--) if(!tambahGerakan(baris, i)) break;
+                    break;
+                case 'N':
+                    [[-2,-1],[-2,1],[-1,-2],[-1,2],[1,-2],[1,2],[2,-1],[2,1]].forEach(([db,dk]) => {
+                        const b=baris+db, k=kolom+dk;
+                        if(b>=0 && b<=7 && k>=0 && k<=7) {
+                            if(!papan[b][k] || dapatkanWarna(papan[b][k]) !== warna) gerakan.push({baris:b, kolom:k});
+                        }
+                    });
+                    break;
+                case 'B':
+                    for(let i=1; i<=7; i++) if(!tambahGerakan(baris+i, kolom+i)) break;
+                    for(let i=1; i<=7; i++) if(!tambahGerakan(baris+i, kolom-i)) break;
+                    for(let i=1; i<=7; i++) if(!tambahGerakan(baris-i, kolom+i)) break;
+                    for(let i=1; i<=7; i++) if(!tambahGerakan(baris-i, kolom-i)) break;
+                    break;
+                case 'Q':
+                    for(let i=baris+1; i<=7; i++) if(!tambahGerakan(i, kolom)) break;
+                    for(let i=baris-1; i>=0; i--) if(!tambahGerakan(i, kolom)) break;
+                    for(let i=kolom+1; i<=7; i++) if(!tambahGerakan(baris, i)) break;
+                    for(let i=kolom-1; i>=0; i--) if(!tambahGerakan(baris, i)) break;
+                    for(let i=1; i<=7; i++) if(!tambahGerakan(baris+i, kolom+i)) break;
+                    for(let i=1; i<=7; i++) if(!tambahGerakan(baris+i, kolom-i)) break;
+                    for(let i=1; i<=7; i++) if(!tambahGerakan(baris-i, kolom+i)) break;
+                    for(let i=1; i<=7; i++) if(!tambahGerakan(baris-i, kolom-i)) break;
+                    break;
+                case 'K':
+                    [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]].forEach(([db,dk]) => {
+                        const b=baris+db, k=kolom+dk;
+                        if(b>=0 && b<=7 && k>=0 && k<=7) {
+                            if(!papan[b][k] || dapatkanWarna(papan[b][k]) !== warna) gerakan.push({baris:b, kolom:k});
+                        }
+                    });
+                    break;
+            }
+            return gerakan;
+        }
+
+        function dapatkanGerakanValid(baris, kolom) {
+            const warna = dapatkanWarna(papan[baris][kolom]);
+            let gerakan = dapatkanGerakanDasar(baris, kolom);
+            gerakan = gerakan.filter(g => simulasiPindah(baris, kolom, g.baris, g.kolom));
+
+            if(papan[baris][kolom] === 'pK' && !sudahBergerak.rajaPutih && !apakahSekak('putih')) {
+                if(!sudahBergerak.bentengKananPutih && !papan[7][5] && !papan[7][6] &&
+                   !posisiDilindungi(7,5,'hitam') && !posisiDilindungi(7,6,'hitam')) {
+                    gerakan.push({baris:7, kolom:6, kastil:'kanan'});
+                }
+                if(!sudahBergerak.bentengKiriPutih && !papan[7][1] && !papan[7][2] && !papan[7][3] &&
+                   !posisiDilindungi(7,3,'hitam') && !posisiDilindungi(7,2,'hitam')) {
+                    gerakan.push({baris:7, kolom:2, kastil:'kiri'});
+                }
+            }
+            if(papan[baris][kolom] === 'hK' && !sudahBergerak.rajaHitam && !apakahSekak('hitam')) {
+                if(!sudahBergerak.bentengKananHitam && !papan[0][5] && !papan[0][6] &&
+                   !posisiDilindungi(0,5,'putih') && !posisiDilindungi(0,6,'putih')) {
+                    gerakan.push({baris:0, kolom:6, kastil:'kanan'});
+                }
+                if(!sudahBergerak.bentengKiriHitam && !papan[0][1] && !papan[0][2] && !papan[0][3] &&
+                   !posisiDilindungi(0,3,'putih') && !posisiDilindungi(0,2,'putih')) {
+                    gerakan.push({baris:0, kolom:2, kastil:'kiri'});
+                }
+            }
+
+            gerakan = gerakan.filter(g => {
+                if(enPassanTarget && g.baris === enPassanTarget.b && g.kolom === enPassanTarget.k && papan[baris][kolom][1] === 'P') {
+                    const simpanMakan = papan[enPassanTarget.b + (warna==='putih'?1:-1)][enPassanTarget.k];
+                    papan[enPassanTarget.b + (warna==='putih'?1:-1)][enPassanTarget.k] = null;
+                    const aman = simulasiPindah(baris, kolom, g.baris, g.kolom);
+                    papan[enPassanTarget.b + (warna==='putih'?1:-1)][enPassanTarget.k] = simpanMakan;
+                    return aman;
+                }
+                return true;
+            });
+            return gerakan;
+        }
+
+        function cekAkhirPermainan() {
+            const lawan = giliran;
+            let adaGerakan = false;
+            for(let b=0; b<8; b++) {
+                for(let k=0; k<8; k++) {
+                    if(dapatkanWarna(papan[b][k]) === lawan) {
+                        if(dapatkanGerakanValid(b,k).length >0) {
+                            adaGerakan = true;
+                            break;
+                        }
+                    }
+                }
+                if(adaGerakan) break;
+            }
+            const info = document.getElementById('infoGiliran');
+            if(!adaGerakan) {
+                if(apakahSekak(lawan)) {
+                    info.textContent = `SEKAK MAT! Pemenang: ${giliran==='putih'?'Putih':'Hitam'}`;
+                } else {
+                    info.textContent = 'SERI! Posisi Buntu';
+                }
+                return true;
+            }
+            if(apakahSekak(lawan)) {
+                info.textContent = `Giliran: ${lawan==='putih'?'Putih':'Hitam'} - SEKAK!`;
+                info.classList.add('sekak');
+            } else {
+                info.textContent = `Giliran: ${lawan==='putih'?'Putih':'Hitam'}`;
+                info.classList.remove('sekak');
+            }
+            return false;
+        }
+
+        function tampilkanPapan() {
+            const elemenPapan = document.getElementById('papan');
+            elemenPapan.innerHTML = '';
+            const info = document.getElementById('infoGiliran');
+            info.classList.remove('sekak');
+
+            for(let baris=0; baris<8; baris++) {
+                for(let kolom=0; kolom<8; kolom++) {
+                    const kotak = document.createElement('div');
+                    kotak.classList.add('kotak');
+                    kotak.classList.add((baris+kolom)%2 === 0 ? 'putih' : 'hitam');
+                    if(papan[baris][kolom]) kotak.textContent = SIMBOL[papan[baris][kolom]];
+                    if(kotakTerpilih && kotakTerpilih.baris === baris && kotakTerpilih.kolom === kolom) kotak.classList.add('terpilih');
+                    if(apakahSekak(giliran) && posisiRaja[giliran].b === baris && posisiRaja[giliran].k === kolom) kotak.classList.add('raja-sekak');
+
+                    const gerakan = gerakanMungkin.find(g => g.baris === baris && g.kolom === kolom);
+                    if(gerakan) {
+                        if(papan[baris][kolom] || (enPassanTarget && baris===enPassanTarget.b && kolom===enPassanTarget.k)) {
+                            kotak.classList.add('makan');
+                        } else {
+                            kotak.classList.add('mungkin');
+                        }
+                    }
+                    kotak.addEventListener('click', () => klikKotak(baris, kolom));
+                    elemenPapan.appendChild(kotak);
+                }
+            }
+            cekAkhirPermainan();
+        }
+
+        function klikKotak(baris, kolom) {
+            const buahDiklik = papan[baris][kolom];
+            const warnaDiklik = dapatkanWarna(buahDiklik);
+            if(warnaDiklik === giliran) {
+                kotakTerpilih = {baris, kolom};
+                gerakanMungkin = dapatkanGerakanValid(baris, kolom);
+                tampilkanPapan();
+                return;
+            }
+            if(kotakTerpilih) {
+                const gerakan = gerakanMungkin.find(g => g.baris === baris && g.kolom === kolom);
+                if(gerakan) {
+                    const dariB = kotakTerpilih.baris, dariK = kotakTerpilih.kolom;
+                    const buah = papan[dariB][dariK];
+                    const warna = dapatkanWarna(buah);
+                    enPassanTarget = null;
+                    if(buah[1] === 'P' && Math.abs(baris - dariB) === 2) {
+                        enPassanTarget = {b: (baris+dariB)/2, k: kolom};
+                    }
+                    if(gerakan.kastil) {
+                        if(gerakan.kastil === 'kanan') {
+                            papan[baris][5] = papan[baris][7];
+                            papan[baris][7] = null;
+                        } else {
+                            papan[baris][3] = papan[baris][0];
+                            papan[baris][0] = null;
+                        }
+                    }
+                    if(buah[1] === 'P' && enPassanTarget && baris === enPassanTarget.b && kolom === enPassanTarget.k) {
+                        papan[dariB + (warna==='putih'?1:-1)][kolom] = null;
+                    }
+                    papan[baris][kolom] = buah;
+                    papan[dariB][dariK] = null;
+                    if(buah === 'pK') { posisiRaja.putih = {b:baris,k:kolom}; sudahBergerak.rajaPutih = true; }
+                    if(buah === 'hK') { posisiRaja.hitam = {b:baris,k:kolom}; sudahBergerak.rajaHitam = true; }
+                    if(dariB===7 && dariK===0) sudahBergerak.bentengKiriPutih = true;
+                    if(dariB===7 && dariK===7) sudahBergerak.bentengKananPutih = true;
+                    if(dariB===0 && dariK===0) sudahBergerak.bentengKiriHitam = true;
+                    if(dariB===0 && dariK===7) sudahBergerak.bentengKananHitam = true;
+
+                    if(buah[1] === 'P' && (baris ===0 || baris ===7)) {
+                        posisiPromosi = {
